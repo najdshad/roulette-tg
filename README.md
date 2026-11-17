@@ -1,10 +1,12 @@
 # Roulette Telegram bot
 
-Native Telegram anonymous roulette and nearby discovery, implemented from [MVP.md](MVP.md). No web app, Mini App, object storage, or media downloads.
+Native Telegram anonymous roulette and nearby discovery, implemented from [MVP.md](MVP.md) on Cloudflare Workers, D1 and SQLite-backed Durable Objects. There is no web app, Mini App, object storage or media download path.
 
 [Verification checklist and remaining production checks](docs/MVP-CHECKLIST.md).
 
-The bot supports adult onboarding and editable photo profiles; free or mutually filtered roulette; credit escrow; anonymous text/photo relay with reply threading; protected View-Once photos; mutual username exchange; nearby profile browsing; asynchronous requests, Super Waves and reconnect invitations; blocks, photo quarantine, Stars packages and a 7-day VIP pass.
+The bot supports adult onboarding and editable photo profiles; free random roulette and mutually filtered searches; credit escrow; anonymous text and photo relay with reply threading; protected View-Once photos; mutual username exchange; nearby profile browsing; asynchronous requests, Super Waves and reconnect invitations; blocks, photo quarantine, Stars packages and a 7-day VIP pass.
+
+Local implementation and tests are complete. Production deployment, real payment checks and live Telegram delivery checks are still required; see the checklist.
 
 ## Run locally
 
@@ -14,7 +16,7 @@ Use Node.js 22.12 or newer.
 npm ci
 cp .dev.vars.example .dev.vars
 # Edit .dev.vars with a development bot token and a random webhook secret.
-# Set BOT_USERNAME, operator contact and GEOCODER_USER_AGENT in wrangler.jsonc.
+# Set BOT_USERNAME, SUPPORT_CONTACT and GEOCODER_USER_AGENT in wrangler.jsonc.
 npm run db:local
 npm run dev
 ```
@@ -25,25 +27,21 @@ Telegram needs a public HTTPS endpoint to deliver webhooks. Point a development 
 WEBHOOK_URL=https://your-development-host/webhook npm run telegram:setup
 ```
 
-Use a separate development bot. Running webhook setup changes that bot's delivery endpoint. It registers the native command menu, verifies the webhook secret format, preserves pending updates, and sets one webhook connection to preserve input order, including photo albums.
+Use a separate development bot. Running webhook setup changes that bot's delivery endpoint. It registers the native command menu, verifies the webhook secret format, preserves pending updates and allows up to ten concurrent webhook connections. Onboarding photo appends are a single atomic SQL statement, so album items can arrive in any order.
 
 ## Verify
 
 ```sh
-npm run typecheck
-npm test
-npm run build
+npm run check        # typecheck, Prettier check and Vitest
+npm run test:runtime # same integration scenarios without a listening socket
+npm run build        # Wrangler dry-run bundle
 ```
 
-Vitest runs inside Cloudflare's Workers runtime with D1 and SQLite-backed Durable Objects. Integration scenarios exercise webhook authentication and replay handling, onboarding/editing, atomic balances and Stars receipts, concurrent matching, filters and blocks, escrow outcomes, fallback and object eviction, relay/replies, photo pricing, View-Once authorization and alarms, both-history deletion, nearby expansion, request quotas and refunds, moderation, consent, and outbound rate limiting. Telegram and the geocoder are mocked; tests never send real notifications or spend Stars.
+Vitest runs inside Cloudflare's Workers runtime with D1 and SQLite-backed Durable Objects. Integration scenarios exercise webhook authentication and replay handling, onboarding/editing and concurrent photo appends, atomic balances and Stars receipts including payment mismatches, concurrent matching, filters and blocks, broken-pair recovery, escrow outcomes, fallback and object eviction, relay/replies and rate limiting, photo pricing and failed-send refunds, View-Once authorization and alarms, both-history deletion, nearby expansion and photo fallback, request quotas and refunds, moderation, consent, and outbound rate limiting. Telegram and the geocoder are mocked; tests never send real notifications or spend Stars.
 
-If a restricted environment cannot bind localhost ports, the same integration scenarios also run without a listening socket:
+If a restricted environment cannot bind localhost ports, the socket-free runner uses `workerd test` with the application's actual Durable Objects, SQLite storage, and Cloudflare's D1 implementation. Its inspection routes exist only in the test bundle, and it uses temporary storage that is removed afterward.
 
-```sh
-npm run test:runtime
-```
-
-This runner invokes `workerd test` with the application's actual Durable Objects, SQLite storage, and Cloudflare's D1 wrapper and Miniflare database implementation. Its inspection routes exist only in the test bundle. It uses temporary storage, which is removed afterward. This command depends on the pinned development packages' bundled test services.
+GitHub Actions runs `npm run check`, `npm run test:runtime` and `npm run build`.
 
 ## Deploy
 
@@ -56,7 +54,7 @@ This runner invokes `workerd test` with the application's actual Durable Objects
    npx wrangler d1 create roulette-tg
    ```
 
-   Copy the returned database ID into `wrangler.jsonc`.
+   Copy the returned database ID into `wrangler.jsonc` in place of the placeholder.
 
 4. Configure secrets and apply migrations:
 
@@ -79,17 +77,23 @@ This runner invokes `workerd test` with the application's actual Durable Objects
 
 6. With two adult test accounts, complete profiles, match, test a reply and a protected photo, stop, and accept a nearby request. Test Stars using Telegram's test environment before taking live payments. Check `/paysupport` points to the operator. Confirm a delivered View-Once photo is deleted after 10 seconds and a normal message after 24 hours. Cloudflare's deployed alarms and real Telegram delivery require this live check; local mocks cannot prove them.
 
-`GET /health` reports process liveness. It exposes no secrets or user data. The only public mutation endpoint is `POST /webhook`, protected by Telegram's secret header. Durable Object methods are accessible only through Worker bindings. Do not expose the internal test bundle.
+## HTTP and internal surfaces
+
+`GET /health` reports process liveness and exposes no secrets or user data. The only public mutation endpoint is `POST /webhook`, protected by Telegram's secret header. Durable Object methods are accessible only through Worker bindings. Do not expose the internal test bundle.
 
 ## Storage and failure handling
 
 - **D1:** profiles contain a five-character geohash and a city label, plus up to three Telegram `file_id` strings. No GPS pin or image bytes are saved. The ledger uses unique operation IDs and SQLite triggers so balance changes and receipts commit together. Successful-payment charge IDs are unique, and VIP purchases extend the existing expiry. Credit reservations reduce the available balance until settlement or refund.
-- **MatchmakerDO:** a singleton atomically pairs compatible queue entries, with bidirectional block and last-partner checks. The in-memory queue is journaled in durable storage. A pending-pair journal resumes session creation after interruption. Paid searches time out after 10 seconds and refund their reservation; free searches expire after 10 minutes of inactivity.
-- **ChatSessionDO:** one SQLite-backed object per pair serializes relay and session actions. It holds message ID mappings, escrow status, photo entitlements, username consents, and pending View-Once file references. Every relayed message and its original are scheduled for deletion 24 hours after delivery. Closing a session preserves deletion work. Revealed photos are protected, spoilered, and deleted 10 seconds after delivery; their stored file reference is removed immediately. An idle session closes after 24 hours, and completed state is purged once deletion work finishes. Transient deletion failures retain state and retry.
+- **MatchmakerDO:** a singleton atomically pairs compatible queue entries, with bidirectional block and last-partner checks. The in-memory queue is journaled in durable storage. The pending-pair journal is cleared before session initialization, and initialization tolerates a missing user or a failed notification, so one broken pair cannot block matching for everyone else. Paid searches time out after 10 seconds and refund their reservation; free searches expire after 10 minutes of inactivity.
+- **ChatSessionDO:** one SQLite-backed object per pair serializes relay and session actions. It holds message ID mappings, escrow status, photo entitlements, username consents and pending View-Once file references. Every relayed message and its original are scheduled for deletion 24 hours after delivery. Closing a session preserves deletion work. Revealed photos are protected, spoilered and deleted 10 seconds after delivery; their stored file reference is removed immediately. An idle session closes after 24 hours, and completed state is purged once deletion work finishes. Transient deletion failures retain state and retry.
 - **TelegramDO:** a small singleton gateway coordinates the bot-wide outbound limit across isolates and per-chat sends, and uses a grammY API transformer to retry 429 responses. It stores scheduling timestamps and coarse location cache entries, never message payloads or GPS pins. Geocoding is cached for seven days and limited to one lookup per 1.1 seconds across the bot. Checkout acknowledgements bypass message throttling.
-- **Maintenance:** the hourly cron expires requests and clears expired icebreakers, removes old request records, deletes abandoned onboarding drafts after a day, and prunes webhook receipt IDs after seven days. Profiles, financial receipts and moderation records persist for the operator to manage.
+- **Maintenance:** the hourly cron expires requests and clears expired icebreakers, removes old request records after three days, deletes abandoned onboarding drafts after a day, and prunes webhook receipt IDs after seven days. Profiles, financial receipts and moderation records persist for the operator to manage.
 
-Standard requests use three free daily allowances, resetting at midnight UTC, then cost two credits. Super Waves cost ten and include an icebreaker; reconnect invitations cost fifteen and require the most recent partner. Costs are consumed on delivery, including when a request is declined or expires; failed deliveries refund the credit charge or daily allowance. VIP waives feature charges for its active duration. Photo quarantine lasts 24 hours after the third unique recent report and alerts the private review channel.
+## Pricing and limits
+
+Text and random roulette are free. New profiles receive 10 welcome credits. Nearby requests use three free daily allowances, resetting at midnight UTC, then cost two credits. Filtered searches hold five credits in escrow, settled after a partner message or 15 seconds connected and refunded on an instant skip or unqualified timeout. Standard photos cost two credits each, with a four-credit session pass. View-Once costs five, Super Waves ten and reconnect invitations fifteen, the latter requiring the most recent partner. VIP waives feature charges for seven days; additional passes extend the expiry.
+
+Request costs are consumed on delivery, including when a request is declined or expires; failed deliveries refund the credit charge or daily allowance. Super Waves arrive as a notification and include an icebreaker; the icebreaker is cleared once the request is delivered, fails or expires. Photo quarantine lasts 24 hours after the third unique recent report and alerts the private review channel.
 
 Telegram does not offer exactly-once sends: an API timeout can occur after delivery but before the response reaches the bot. Update receipts and operation IDs prevent ordinary replay duplicates and duplicate charges, but cannot eliminate that external ambiguity. Secrets, update bodies, GPS pins, text and Telegram error payloads are never logged by this app; only a failed update ID is logged. Keep infrastructure request-body logging disabled as well.
 
@@ -97,7 +101,9 @@ Telegram does not offer exactly-once sends: an API timeout can occur after deliv
 
 Telegram bots cannot receive users' live typing activity; this bot emits `typing` / `upload_photo` while it relays supported content. `protect_content` blocks normal forwarding and saving, and View-Once uses a spoiler, but no bot can guarantee screenshot prevention across clients or prevent photography with another device. The ten-second timer begins on photo delivery, not on opening Telegram's spoiler, because Telegram supplies no spoiler-open event.
 
-Deletion is scheduled for 24 hours, within Telegram's 48-hour deletion window. Telegram outages, a blocked bot, lost deletion permissions, or independent recipient copies can prevent complete erasure. This is disclosed in `/privacy` and `/terms`; do not advertise cryptographic secrecy or guaranteed erasure. The native GPS message is deleted during onboarding. Location lookup sends the pin to OpenStreetMap's Nominatim service on a cache miss; manual city entry avoids sharing a pin. No individual coordinates are persisted, and profile distances use coarse buckets rather than calculated exact values. Public Nominatim is suitable only for modest MVP traffic: follow its [usage policy](https://operations.osmfoundation.org/policies/nominatim/), including a maximum of one request per second for the whole application, an identifying User-Agent, caching, and attribution. Configure a compliant operator identity; `GEOCODER_URL` can switch to another Nominatim-compatible service without a code change.
+Deletion is scheduled for 24 hours, within Telegram's 48-hour deletion window. Telegram outages, a blocked bot, lost deletion permissions or independent recipient copies can prevent complete erasure. This is disclosed in `/privacy` and `/terms`; do not advertise cryptographic secrecy or guaranteed erasure. The native GPS message is deleted during onboarding. Location lookup sends the pin to OpenStreetMap's Nominatim service on a cache miss; manual city entry avoids sharing a pin. No individual coordinates are persisted, and profile distances use coarse buckets rather than calculated exact values.
+
+Public Nominatim is suitable only for modest MVP traffic: follow its [usage policy](https://operations.osmfoundation.org/policies/nominatim/), including a maximum of one request per second for the whole application, an identifying User-Agent, caching and attribution. Configure a compliant operator identity; `GEOCODER_URL` can switch to another Nominatim-compatible service without a code change.
 
 ## Moderation and support operations
 
