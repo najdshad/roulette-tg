@@ -3,9 +3,11 @@
 import { build } from "esbuild";
 import { readD1Migrations } from "@cloudflare/vitest-plugin";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve, join } from "node:path";
+import { resolve, join, dirname } from "node:path";
 import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 
 const dir = await mkdtemp(join(tmpdir(), "roulette-tests-"));
 try {
@@ -21,7 +23,12 @@ try {
       target: "es2022",
     });
   const migrations = await readD1Migrations("./migrations");
-  const workers = resolve("node_modules/miniflare/dist/src/workers");
+  const workers = resolve(
+    dirname(createRequire(import.meta.url).resolve("miniflare/package.json")),
+    "dist/src/workers",
+  );
+  if (!existsSync(workers))
+    throw new Error(`miniflare workers not found at ${workers}; run npm ci first`);
   const text = (value) => JSON.stringify(value);
   const embed = (path) => `embed ${text(path)}`;
   const dbBinding = `(name="DB", wrapped=(moduleName="cloudflare-internal:d1-api", innerBindings=[(name="fetcher",service="d1-entry")]))`;

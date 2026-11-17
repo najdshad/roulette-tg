@@ -2,7 +2,8 @@ import { env as bindings } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterAll, beforeAll, test, vi } from "vitest";
 import { queueControl, sessionControl } from "./controls";
-import { scenarios, type Harness } from "./scenarios";
+import { createHarness } from "./harness";
+import { scenarios } from "./scenarios";
 import { fakeUpstream } from "./upstream";
 import type { Env } from "../src/types";
 
@@ -13,27 +14,18 @@ beforeAll(() =>
   ),
 );
 afterAll(() => vi.unstubAllGlobals());
-const h: Harness = {
-  env,
-  calls: async () =>
-    (await (await fakeUpstream(new Request("https://fake/__test/calls"))).json()) as any,
-  fail: async (failure) => {
-    await fakeUpstream(
-      new Request("https://fake/__test/fail", { method: "POST", body: JSON.stringify(failure) }),
-    );
-  },
-  session: async (id, action, data) =>
+const h = createHarness(env, fakeUpstream, {
+  session: (id, action, data) =>
     runInDurableObject(env.SESSIONS.getByName(id), (instance, state) =>
       sessionControl(instance, state, action, data),
     ),
-  queue: async (action) =>
+  queue: (action, data) =>
     action === "evict"
       ? evictDurableObject(env.MATCHMAKER.getByName("global"))
       : runInDurableObject(env.MATCHMAKER.getByName("global"), (instance, state) =>
-          queueControl(instance, state, action),
+          queueControl(instance, state, action, data),
         ),
   reset: async () => {
-    await fakeUpstream(new Request("https://fake/__test/reset"));
     await runInDurableObject(env.MATCHMAKER.getByName("global"), (instance, state) =>
       queueControl(instance, state, "reset"),
     );
@@ -41,7 +33,7 @@ const h: Harness = {
       await state.storage.deleteAll();
     });
   },
-};
+});
 for (const scenario of scenarios)
   test(scenario.name, async () => {
     await h.reset();

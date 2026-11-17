@@ -10,7 +10,7 @@ This specification defines the Minimum Viable Product (MVP) requirements, user f
 * **Profile Creation:** Simple, fast user onboarding capturing Name, Gender, 18+ Age, Coarse/City Location, and up to 3 compressed photos.
 
 
-* **Matchmaking & Discovery:** Real-time Random Roulette pairing (unfiltered or filtered by Gender, Age, and Location) alongside an asynchronous "People Nearby" profile browsing deck with direct chat requests and priority waves.
+* **Matchmaking & Discovery:** Real-time Random Roulette pairing (unfiltered or filtered by Gender, Age, and Location) alongside an asynchronous "People Nearby" profile browsing deck with direct chat requests and notifying waves.
 
 
 * **Ephemeral Chat & Media:** Anonymous 1-on-1 chat relay supporting text, compressed photos, protected self-destructing ("View-Once") photos, and automated 24-hour message and media deletion from both backend state and users' Telegram chat histories.
@@ -98,7 +98,7 @@ This specification defines the Minimum Viable Product (MVP) requirements, user f
 | Filtered Roulette | 5 Credits | Escrowed for 15s or 1st reply |
 | Standard Photo | 2 or 4 Credits | 2 per photo or 4 per session |
 | Self-Destruct Photo | 5 Credits | Protected + 10s reveal timer |
-| Super Wave | 10 Credits | Priority request + icebreaker |
+| Super Wave | 10 Credits | Notification + icebreaker |
 | Reconnect Partner | 15 Credits | Invites last skipped partner |
 
 All credit rules above are enforced atomically between D1 and the active session Durable Object.

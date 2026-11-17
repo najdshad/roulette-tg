@@ -39,6 +39,7 @@ interface State {
   greeted: number[];
   released: boolean;
   feedback: number[];
+  relayWindow?: Record<string, { start: number; count: number }>;
 }
 type Ephemeral = {
   id: number;
@@ -191,22 +192,34 @@ export class ChatSessionDO extends DurableObject<Env> {
           ] as const) {
             const viewer = await getUser(this.env, viewerId),
               subject = await getUser(this.env, subjectId);
-            if (!viewer || !subject) throw new Error("Missing session user");
-            if (!s.profileSent.includes(viewerId)) {
-              const messages = await profile(this.env, viewer, subject);
-              for (const message of messages) this.remember(viewerId, message.message_id);
-              s.profileSent.push(viewerId);
-              this.save(s);
-            }
-            if (!s.greeted.includes(viewerId)) {
-              await this.notice(
-                s,
-                viewerId,
-                "You’re connected. Say hello!\nText is free. Photos: 2 credits each or /photos for a 4-credit session pass. /viewonce: 5 credits.\nMessages disappear after 24 hours. /next · /stop · /reveal",
-                { reply_markup: chatMenu },
+            if (!viewer || !subject) continue;
+            try {
+              if (!s.profileSent.includes(viewerId)) {
+                const messages = await profile(this.env, viewer, subject);
+                for (const message of messages) this.remember(viewerId, message.message_id);
+                s.profileSent.push(viewerId);
+                this.save(s);
+              }
+              if (!s.greeted.includes(viewerId)) {
+                await this.notice(
+                  s,
+                  viewerId,
+                  "You’re connected. Say hello!\nText is free. Photos: 2 credits each or /photos for a 4-credit session pass. /viewonce: 5 credits.\nMessages disappear after 24 hours. /next · /stop · /reveal",
+                  { reply_markup: chatMenu },
+                );
+                s.greeted.push(viewerId);
+                this.save(s);
+              }
+            } catch (error) {
+              if (!(error instanceof TelegramError)) throw error;
+              console.error(
+                JSON.stringify({
+                  event: "session_init_send_failed",
+                  session_id: s.id,
+                  user_id: viewerId,
+                  code: error.code,
+                }),
               );
-              s.greeted.push(viewerId);
-              this.save(s);
             }
           }
           await this.schedule(s);
@@ -317,6 +330,17 @@ export class ChatSessionDO extends DurableObject<Env> {
       this.save(s);
       return;
     }
+    const now = Date.now();
+    s.relayWindow ??= {};
+    const window = (s.relayWindow[String(id)] ??= { start: now, count: 0 });
+    if (now - window.start > 10_000) {
+      window.start = now;
+      window.count = 0;
+    }
+    window.count += 1;
+    this.save(s);
+    if (window.count > 10)
+      throw new UserError("Too many messages at once. Wait a moment and try again.");
     const user = await getUser(this.env, id);
     if (!user || user.is_banned) throw new UserError("Your account is unavailable.");
     const other = await getUser(this.env, partner);
@@ -450,6 +474,7 @@ export class ChatSessionDO extends DurableObject<Env> {
     }
   }
   private async consent(s: State, id: number, username: string): Promise<void> {
+    if (s.consents[String(id)]) return;
     if (!/^[a-zA-Z0-9_]{5,32}$/.test(username))
       throw new UserError(
         "Set a public Telegram username in Telegram settings before using /reveal.",
@@ -526,22 +551,24 @@ export class ChatSessionDO extends DurableObject<Env> {
           s,
           id!,
           `${reason}\nUnqualified filtered-search fees are refunded automatically. Messages still expire on their original schedule.`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: "Reconnect · 15 credits",
-                    callback_data: `reconnect:${subject!.public_id}`,
-                  },
-                ],
-                [
-                  { text: "Block", callback_data: `block:${subject!.public_id}` },
-                  { text: "Report", callback_data: `report:${subject!.public_id}` },
-                ],
-              ],
-            },
-          },
+          subject
+            ? {
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      {
+                        text: "Reconnect · 15 credits",
+                        callback_data: `reconnect:${subject.public_id}`,
+                      },
+                    ],
+                    [
+                      { text: "Block", callback_data: `block:${subject.public_id}` },
+                      { text: "Report", callback_data: `report:${subject.public_id}` },
+                    ],
+                  ],
+                },
+              }
+            : {},
         );
         await this.notice(s, id!, "Choose your next step.", { reply_markup: menu });
       } catch (error) {
@@ -556,6 +583,21 @@ export class ChatSessionDO extends DurableObject<Env> {
     return this.serial(async () => {
       const s = this.load();
       if (!s) return;
+      if (!s.initialized) {
+        // init failed before D1 accepted the pair; release the orphan so it cannot linger.
+        for (const escrow of s.escrows)
+          if (!escrow.settled) await refund(this.env, escrow.userId, escrow.key);
+        await this.env.DB.prepare(
+          "UPDATE users SET state = CASE WHEN state = 'INACTIVE' THEN state ELSE 'IDLE' END, active_session_id = NULL WHERE active_session_id = ?",
+        )
+          .bind(s.id)
+          .run();
+        this.ctx.storage.sql.exec(
+          "DELETE FROM session_state; DELETE FROM operations; DELETE FROM ephemeral_messages;",
+        );
+        await this.ctx.storage.deleteAlarm();
+        return;
+      }
       const now = Date.now();
       if (s.closed && (!s.released || s.feedback.length < 2)) await this.close(s, "Chat ended.");
       if (!s.closed && now >= s.lastActivity + DAY)

@@ -43,12 +43,12 @@ await api("setMyCommands", {
     { command: "paysupport", description: "Payment help and refund requests" },
   ],
 });
-// Sequential webhook delivery keeps onboarding albums and profile input ordered.
+// Onboarding photo appends are a single atomic D1 statement, so album items may arrive concurrently.
 // Pairing and session correctness are independently protected by Durable Objects.
 await api("setWebhook", {
   url: url.toString(),
   secret_token: WEBHOOK_SECRET,
-  max_connections: 1,
+  max_connections: 10,
   allowed_updates: ["message", "callback_query", "pre_checkout_query"],
   drop_pending_updates: false,
 });

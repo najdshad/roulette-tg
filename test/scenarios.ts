@@ -16,21 +16,9 @@ import {
   hasUrl,
   validName,
 } from "../src/privacy";
-import { DAY, FREE_FILTERS, type Env, type Filters, type User } from "../src/types";
-import type { Failure, Sent } from "./upstream";
-
-export interface Harness {
-  env: Env;
-  calls(): Promise<Sent[]>;
-  fail(failure: Failure): Promise<void>;
-  session(
-    id: string,
-    action: "inspect" | "patch" | "expire" | "alarm",
-    data?: object,
-  ): Promise<any>;
-  queue(action: "reset" | "inspect" | "expire" | "alarm" | "evict"): Promise<any>;
-  reset(): Promise<void>;
-}
+import { DAY, FREE_FILTERS, type Filters, type User } from "../src/types";
+import type { Harness } from "./harness";
+import type { Sent } from "./upstream";
 let uid = 1000,
   updateId = 1,
   msgId = 100000;
@@ -265,11 +253,18 @@ export const scenarios: { name: string; run(h: Harness): Promise<void> }[] = [
         photo: [{ file_id: "fourth", file_unique_id: "x", width: 800, height: 800 }],
       });
       assert.equal((await getDraft(h.env, id))!.photos!.length, 3);
+      const kept = (await getDraft(h.env, id))!.photos!;
+      const callsBeforeDuplicate = (await h.calls()).length;
+      await message(h, id, undefined, {
+        photo: [{ file_id: kept[0], file_unique_id: "dup", width: 800, height: 800 }],
+      });
+      assert.equal((await getDraft(h.env, id))!.photos!.length, 3);
+      assert.equal((await h.calls()).length, callsBeforeDuplicate);
       await message(h, id, "Done with photos");
       const user = (await getUser(h.env, id))!;
       assert.equal(user.credits, 10);
       assert.equal(user.gender, "O");
-      assert.deepEqual(JSON.parse(user.photo_files), ["large0", "large1", "large2"]);
+      assert.deepEqual(JSON.parse(user.photo_files), kept);
       assert.equal(await getDraft(h.env, id), null);
       await message(h, id, "/start");
       assert.equal((await getUser(h.env, id))!.credits, 10);
@@ -671,6 +666,12 @@ export const scenarios: { name: string; run(h: Harness): Promise<void> }[] = [
         icebreaker: "Tell me about your favorite book.",
       });
       assert.equal((await getUser(h.env, sender.telegram_id))!.credits, 88);
+      const superRow = await h.env.DB.prepare(
+        "SELECT id,icebreaker_text FROM chat_requests WHERE sender_id=? AND kind='SUPER'",
+      )
+        .bind(sender.telegram_id)
+        .first<{ id: string; icebreaker_text: string | null }>();
+      assert.equal(superRow!.icebreaker_text, null);
       await h.env.DB.prepare("UPDATE users SET last_partner_id=? WHERE telegram_id=?")
         .bind(targets[5]!.telegram_id, sender.telegram_id)
         .run();
@@ -681,20 +682,22 @@ export const scenarios: { name: string; run(h: Harness): Promise<void> }[] = [
         kind: "RECONNECT",
       });
       assert.equal((await getUser(h.env, sender.telegram_id))!.credits, 73);
-      const row = await h.env.DB.prepare(
-        "SELECT id FROM chat_requests WHERE sender_id=? AND kind='SUPER'",
-      )
-        .bind(sender.telegram_id)
-        .first<{ id: string }>();
       await join(h, sender, { ...FREE_FILTERS, minAge: 20 });
-      await matchAction(h.env, "accept", { userId: targets[4]!.telegram_id, requestId: row!.id });
+      await matchAction(h.env, "accept", {
+        userId: targets[4]!.telegram_id,
+        requestId: superRow!.id,
+      });
       assert.equal((await getUser(h.env, sender.telegram_id))!.credits, 73);
       assert.equal(
         (await getUser(h.env, sender.telegram_id))!.active_session_id,
         (await getUser(h.env, targets[4]!.telegram_id))!.active_session_id,
       );
       await assert.rejects(
-        () => matchAction(h.env, "accept", { userId: targets[3]!.telegram_id, requestId: row!.id }),
+        () =>
+          matchAction(h.env, "accept", {
+            userId: targets[3]!.telegram_id,
+            requestId: superRow!.id,
+          }),
         /no longer available/,
       );
       const reset = await seed(h, { daily_free_waves: 0, waves_reset_at: Date.now() - 1 });
@@ -792,6 +795,12 @@ export const scenarios: { name: string; run(h: Harness): Promise<void> }[] = [
         sentTo(await h.calls(), "sendMessage", a.telegram_id).some((c) =>
           c.payload.text.includes(`@handle_${b.telegram_id}`),
         ),
+      );
+      const consentCalls = (await h.calls()).filter((c) => c.method === "sendMessage").length;
+      await callback(h, a.telegram_id, `consent:${id}`);
+      assert.equal(
+        (await h.calls()).filter((c) => c.method === "sendMessage").length,
+        consentCalls,
       );
       const third = await seed(h);
       await message(h, a.telegram_id, "/next");
@@ -903,6 +912,147 @@ export const scenarios: { name: string; run(h: Harness): Promise<void> }[] = [
       );
       assert.equal(calls.length, 2);
       assert.ok(calls[1]!.at - calls[0]!.at >= 950);
+    },
+  },
+  {
+    name: "failed photo relays refund, suspended View-Once refunds, and stale photos fall back to text",
+    async run(h) {
+      const [a, b, id] = await pair(h);
+      await h.fail({ method: "sendPhoto", chat: b.telegram_id, code: 403, remaining: 1 });
+      await assert.rejects(
+        () => relay(h, id, a, { text: undefined, file: "undeliverable-photo" }),
+        /unavailable/,
+      );
+      assert.equal((await getUser(h.env, a.telegram_id))!.credits, 100);
+
+      const [c, d, id2] = await pair(h);
+      await sessionAction(h.env, id2, "view-mode", { userId: c.telegram_id });
+      await relay(h, id2, c, { text: undefined, file: "suspended-view" });
+      assert.equal((await getUser(h.env, c.telegram_id))!.credits, 95);
+      await h.env.DB.prepare("UPDATE users SET photo_suspended_until=? WHERE telegram_id=?")
+        .bind(Date.now() + DAY, c.telegram_id)
+        .run();
+      const view = (await h.session(id2, "inspect")).state.views[0];
+      await assert.rejects(
+        () =>
+          sessionAction(h.env, id2, "reveal-photo", {
+            userId: d.telegram_id,
+            viewId: view.id,
+          }),
+        /no longer available/,
+      );
+      assert.equal((await getUser(h.env, c.telegram_id))!.credits, 100);
+
+      const viewer = await seed(h, { geohash: "u0000" }),
+        subject = await seed(h, { geohash: "u0000" });
+      await h.fail({ method: "sendMediaGroup", chat: viewer.telegram_id, code: 400, remaining: 1 });
+      await nearby(h.env, viewer);
+      assert.ok(
+        sentTo(await h.calls(), "sendMessage", viewer.telegram_id).some((c) =>
+          String(c.payload.text).startsWith(subject.display_name),
+        ),
+      );
+    },
+  },
+  {
+    name: "payment mismatches are recorded, never retried, and only the owner payload grants",
+    async run(h) {
+      const u = await seed(h, { credits: 10 });
+      const base = {
+        currency: "XTR",
+        total_amount: 1,
+        invoice_payload: `v1:${u.telegram_id}:popular`,
+        telegram_payment_charge_id: "mismatch-amount",
+        provider_payment_charge_id: "",
+      };
+      await successfulPayment(h.env, u.telegram_id, base);
+      assert.equal((await getUser(h.env, u.telegram_id))!.credits, 185);
+      const recorded = await h.env.DB.prepare(
+        "SELECT package_id,stars_paid,credits_granted FROM star_transactions WHERE charge_id=?",
+      )
+        .bind("mismatch-amount")
+        .first<{ package_id: string; stars_paid: number; credits_granted: number }>();
+      assert.equal(recorded!.package_id, "popular");
+      assert.equal(recorded!.stars_paid, 1);
+      assert.equal(recorded!.credits_granted, 175);
+      await successfulPayment(h.env, u.telegram_id, {
+        ...base,
+        invoice_payload: `v1:${u.telegram_id + 1}:popular`,
+        telegram_payment_charge_id: "foreign-payload",
+      });
+      assert.equal((await getUser(h.env, u.telegram_id))!.credits, 185);
+      const foreign = await h.env.DB.prepare(
+        "SELECT credits_granted FROM star_transactions WHERE charge_id=?",
+      )
+        .bind("foreign-payload")
+        .first<{ credits_granted: number }>();
+      assert.equal(foreign!.credits_granted, 0);
+      assert.equal(sentTo(await h.calls(), "sendMessage", -100999).length, 2);
+    },
+  },
+  {
+    name: "a pair journal whose user disappeared is cleared and does not block matching",
+    async run(h) {
+      const a = await seed(h),
+        sessionId = "broken-pair-session";
+      await h.queue("pair", {
+        id: sessionId,
+        a: a.telegram_id,
+        b: 999999999,
+        escrows: [],
+        requestId: null,
+      });
+      await h.queue("alarm");
+      assert.equal((await getUser(h.env, a.telegram_id))!.active_session_id, sessionId);
+      await assert.rejects(() => relay(h, sessionId, a), /unavailable/);
+      assert.equal((await getUser(h.env, a.telegram_id))!.active_session_id, null);
+      const c = await seed(h),
+        d = await seed(h);
+      await join(h, c);
+      await join(h, d);
+      assert.equal((await getUser(h.env, c.telegram_id))!.state, "IN_CHAT");
+      assert.equal(
+        (await getUser(h.env, c.telegram_id))!.active_session_id,
+        (await getUser(h.env, d.telegram_id))!.active_session_id,
+      );
+    },
+  },
+  {
+    name: "an uninitialized session alarm refunds escrow and releases both users",
+    async run(h) {
+      const [a, b, id] = await pair(h, true);
+      assert.equal((await getUser(h.env, a.telegram_id))!.credits, 95);
+      await h.session(id, "patch", { initialized: false });
+      await h.session(id, "alarm");
+      assert.equal((await getUser(h.env, a.telegram_id))!.credits, 100);
+      for (const user of [a, b]) {
+        const after = (await getUser(h.env, user.telegram_id))!;
+        assert.equal(after.active_session_id, null);
+        assert.equal(after.state, "IDLE");
+      }
+      assert.equal((await h.session(id, "inspect")).state, null);
+    },
+  },
+  {
+    name: "relay rate limit rejects an eleventh message within ten seconds",
+    async run(h) {
+      const [a, b, id] = await pair(h);
+      await h.session(id, "patch", {
+        relayWindow: { [String(a.telegram_id)]: { start: Date.now(), count: 10 } },
+      });
+      const before = (await h.calls()).length;
+      await assert.rejects(() => relay(h, id, a, { text: "eleven" }), /Too many messages/);
+      assert.equal((await h.calls()).length, before);
+      await h.session(id, "patch", {
+        relayWindow: { [String(a.telegram_id)]: { start: Date.now() - 11_000, count: 10 } },
+      });
+      await relay(h, id, a, { text: "after the window" });
+      assert.equal(
+        sentTo(await h.calls(), "sendMessage", b.telegram_id).filter(
+          (c) => c.payload.text === "after the window",
+        ).length,
+        1,
+      );
     },
   },
 ];

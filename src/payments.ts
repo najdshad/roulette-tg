@@ -60,8 +60,9 @@ export async function successfulPayment(
   payment: SuccessfulPayment,
 ): Promise<void> {
   const pack = packageFromPayload(payment.invoice_payload, id);
-  if (!pack || payment.currency !== "XTR" || payment.total_amount !== pack.stars)
-    throw new Error("Payment validation failed");
+  const amount =
+    Number.isInteger(payment.total_amount) && payment.total_amount > 0 ? payment.total_amount : 0;
+  // Record first: a webhook that throws is retried forever, and the Stars are already captured.
   await env.DB.prepare(
     `INSERT INTO star_transactions
     (charge_id, telegram_id, package_id, stars_paid, credits_granted, vip_days, created_at)
@@ -70,17 +71,31 @@ export async function successfulPayment(
     .bind(
       payment.telegram_payment_charge_id,
       id,
-      pack.id,
-      pack.stars,
-      pack.credits,
-      pack.days,
+      pack?.id ?? payment.invoice_payload,
+      amount,
+      pack?.credits ?? 0,
+      pack?.days ?? 0,
       Date.now(),
     )
     .run();
+  if (!pack || payment.currency !== "XTR" || amount !== pack.stars) {
+    // A valid payload still grants; only an unknown owner is refused. Alert a human either way.
+    try {
+      if (env.ADMIN_CHAT_ID)
+        await tell(
+          env,
+          Number(env.ADMIN_CHAT_ID),
+          `⚠️ Payment mismatch\nUser: ${id}\nPayload: ${payment.invoice_payload}\nCurrency: ${payment.currency}\nAmount: ${payment.total_amount}\nCharge: ${payment.telegram_payment_charge_id}`,
+        );
+    } catch {
+      // The receipt is already stored; a failed alert must not trigger a Telegram retry.
+    }
+    return;
+  }
   const user = await getUser(env, id);
   await tell(
     env,
     id,
-    `Payment received. Balance: ${user!.credits} credits.${pack.days ? "\nVIP is active. Check /balance for the expiry date." : ""}`,
+    `Payment received. Balance: ${user?.credits ?? 0} credits.${pack.days ? "\nVIP is active. Check /balance for the expiry date." : ""}`,
   );
 }

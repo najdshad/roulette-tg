@@ -80,6 +80,20 @@ export class MatchmakerDO extends DurableObject<Env> {
       throw new UserError("This account is unavailable. Send /start to return.");
     return user;
   }
+  // One query per 100 queued users instead of one query per user.
+  private async usersById(ids: number[]): Promise<Map<number, User>> {
+    const users = new Map<number, User>();
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const rows = await this.env.DB.prepare(
+        `SELECT * FROM users WHERE telegram_id IN (${chunk.map(() => "?").join(",")})`,
+      )
+        .bind(...chunk)
+        .all<User>();
+      for (const row of rows.results) users.set(row.telegram_id, row);
+    }
+    return users;
+  }
   async fetch(request: Request): Promise<Response> {
     return this.serial(async () => {
       try {
@@ -181,9 +195,10 @@ export class MatchmakerDO extends DurableObject<Env> {
       await this.leave(user.telegram_id);
       throw error;
     }
-    for (const other of [...this.queue.values()]) {
-      if (other.id === user.telegram_id) continue;
-      const candidate = await getUser(this.env, other.id);
+    const others = [...this.queue.values()].filter((e) => e.id !== user.telegram_id);
+    const users = await this.usersById(others.map((e) => e.id));
+    for (const other of others) {
+      const candidate = users.get(other.id);
       if (
         !candidate ||
         candidate.state !== "QUEUED" ||
@@ -236,12 +251,17 @@ export class MatchmakerDO extends DurableObject<Env> {
   private async recoverPair(): Promise<void> {
     const pair = await this.ctx.storage.get<Pair>("pair");
     if (!pair) return;
-    // Initialization commits the D1 reservation once, and resumes notifications after a restart.
-    await sessionAction(this.env, pair.id, "init", pair);
+    // Clear the journal first: init is idempotent, and one pair that cannot initialize
+    // must not block matching for everyone else.
+    await this.ctx.storage.delete("pair");
     this.queue.delete(pair.a);
     this.queue.delete(pair.b);
     await this.persist();
-    await this.ctx.storage.delete("pair");
+    try {
+      await sessionAction(this.env, pair.id, "init", pair);
+    } catch {
+      console.error(JSON.stringify({ event: "pair_init_failed", session_id: pair.id }));
+    }
   }
   private async request(
     sender: User,
@@ -340,16 +360,16 @@ export class MatchmakerDO extends DurableObject<Env> {
         },
       );
       await this.env.DB.prepare(
-        "UPDATE chat_requests SET delivery_phase=2,delivered_at=? WHERE id=?",
+        "UPDATE chat_requests SET delivery_phase=2,delivered_at=?,icebreaker_text=NULL WHERE id=?",
       )
         .bind(Date.now(), requestId)
         .run();
     } catch (error) {
       await this.env.DB.batch([
         refundStatement(this.env, sender.telegram_id, `request:${requestId}`),
-        this.env.DB.prepare("UPDATE chat_requests SET status = 'FAILED' WHERE id = ?").bind(
-          requestId,
-        ),
+        this.env.DB.prepare(
+          "UPDATE chat_requests SET status = 'FAILED', icebreaker_text = NULL WHERE id = ?",
+        ).bind(requestId),
         this.env.DB.prepare(
           "UPDATE users SET daily_free_waves = daily_free_waves + (SELECT uses_free FROM chat_requests WHERE id = ?) WHERE telegram_id = ? AND waves_reset_at = ?",
         ).bind(
@@ -393,8 +413,10 @@ export class MatchmakerDO extends DurableObject<Env> {
     return this.serial(async () => {
       await this.recoverPair();
       const now = Date.now();
-      for (const entry of [...this.queue.values()]) {
-        const user = await getUser(this.env, entry.id);
+      const entries = [...this.queue.values()];
+      const users = await this.usersById(entries.map((e) => e.id));
+      for (const entry of entries) {
+        const user = users.get(entry.id);
         if (!user || user.state !== "QUEUED" || user.is_banned) {
           await this.leave(entry.id);
           continue;

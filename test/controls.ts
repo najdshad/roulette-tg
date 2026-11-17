@@ -35,8 +35,14 @@ export async function sessionControl(
   if (action === "alarm") await instance.alarm();
   return { ok: true };
 }
-export async function queueControl(instance: any, state: DurableObjectState, action: string) {
+export async function queueControl(
+  instance: any,
+  state: DurableObjectState,
+  action: string,
+  data: any = {},
+) {
   if (action === "inspect") return [...instance.queue.values()];
+  if (action === "pair") await state.storage.put("pair", data);
   if (action === "reset") {
     instance.queue.clear();
     await state.storage.put("queue", []);

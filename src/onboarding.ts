@@ -148,16 +148,27 @@ export async function onboardingMessage(env: Env, ctx: Context, draft: Draft): P
     }
   } else if (draft.step === "photos") {
     if (message.photo?.length) {
-      if ((draft.photos?.length ?? 0) >= 3)
+      const file = highestPhoto(message.photo)!;
+      // Album items arrive as separate updates: append in one statement so the cap holds.
+      const row = await env.DB.prepare(
+        `UPDATE drafts SET data = json_insert(data, '$.photos[#]', ?), updated_at = ?
+        WHERE telegram_id = ? AND json_extract(data, '$.step') = 'photos'
+          AND json_array_length(json_extract(data, '$.photos')) < 3
+          AND NOT EXISTS (
+            SELECT 1 FROM json_each(json_extract(drafts.data, '$.photos')) WHERE value = ?
+          )
+        RETURNING json_array_length(json_extract(data, '$.photos')) AS n`,
+      )
+        .bind(file, Date.now(), id, file)
+        .first<{ n: number }>();
+      if (!row) {
+        const current = await getDraft(env, id);
+        if (!current || current.step !== "photos")
+          throw new UserError("That button belongs to an earlier step. Follow the latest prompt.");
+        if (current.photos?.includes(file)) return;
         throw new UserError("You already have 3 photos. Tap Done with photos.");
-      draft.photos ??= [];
-      draft.photos.push(highestPhoto(message.photo)!);
-      await putDraft(env, id, draft);
-      await tell(
-        env,
-        id,
-        `Photo ${draft.photos.length} of 3 added. Send another photo or tap Done with photos.`,
-      );
+      }
+      await tell(env, id, `Photo ${row.n} of 3 added. Send another photo or tap Done with photos.`);
     } else if (text === "Done with photos" || text === "/done") {
       if (!draft.photos?.length) throw new UserError("Add at least one compressed photo first.");
       await finish(env, id, draft);

@@ -261,26 +261,35 @@ export async function profile(
   const photos = JSON.parse(subject.photo_files) as string[];
   if (subject.photo_suspended_until > Date.now() || !photos.length)
     return [await tell(env, viewer.telegram_id, caption, extra)];
-  if (photos.length === 1)
-    return [
-      await call(env, "sendPhoto", {
-        chat_id: viewer.telegram_id,
-        photo: photos[0],
-        caption,
-        protect_content: true,
-        ...extra,
-      }),
-    ];
-  const messages = await call<Message[]>(env, "sendMediaGroup", {
-    chat_id: viewer.telegram_id,
-    protect_content: true,
-    disable_notification: "disable_notification" in extra ? extra.disable_notification : undefined,
-    media: photos.map((photo, i) => ({
-      type: "photo",
-      media: photo,
-      ...(i === 0 ? { caption } : {}),
-    })),
-  });
+  let messages: Message[];
+  try {
+    messages =
+      photos.length === 1
+        ? [
+            await call(env, "sendPhoto", {
+              chat_id: viewer.telegram_id,
+              photo: photos[0],
+              caption,
+              protect_content: true,
+              ...extra,
+            }),
+          ]
+        : await call<Message[]>(env, "sendMediaGroup", {
+            chat_id: viewer.telegram_id,
+            protect_content: true,
+            disable_notification:
+              "disable_notification" in extra ? extra.disable_notification : undefined,
+            media: photos.map((photo, i) => ({
+              type: "photo",
+              media: photo,
+              ...(i === 0 ? { caption } : {}),
+            })),
+          });
+  } catch (error) {
+    // A stale Telegram file reference must not break the profile entirely.
+    if (!(error instanceof TelegramError) || error.code !== 400) throw error;
+    return [await tell(env, viewer.telegram_id, caption, extra)];
+  }
   if ("reply_markup" in extra)
     messages.push(await tell(env, viewer.telegram_id, "Choose an action below.", extra));
   return messages;

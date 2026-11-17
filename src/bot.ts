@@ -113,7 +113,7 @@ export function createBot(env: Env): Bot {
     await tell(
       env,
       ctx.from!.id,
-      "We store your adult profile, a coarse five-character geohash (~5 km cell), city/country label, Telegram photo references, balance and payment receipts, blocks and reports. We never store GPS pins, chat text, or image files. GPS coordinates are sent once to OpenStreetMap’s Nominatim geocoder; choose a city manually if you prefer.\n\nDuring chats we keep message IDs for replies and deletion. Incoming and relayed chat messages are scheduled for deletion after 24 hours; View-Once delivery after 10 seconds. Telegram outages, blocked bots, and client copies can prevent deletion. Protected content cannot guarantee screenshot prevention. Profiles persist until you ask the operator to remove them. /paysupport for operator contact.",
+      "We store your adult profile, a coarse five-character geohash (~5 km cell), city/country label, Telegram photo references, balance and payment receipts, blocks and reports. We never store GPS pins or image files. Wave icebreakers are kept until the request is delivered or expires. GPS coordinates are sent once to OpenStreetMap’s Nominatim geocoder; choose a city manually if you prefer.\n\nDuring chats we keep message IDs for replies and deletion; relayed text passes through without being stored. Incoming and relayed chat messages are scheduled for deletion after 24 hours; View-Once delivery after 10 seconds. Telegram outages, blocked bots, and client copies can prevent deletion. Protected content cannot guarantee screenshot prevention. Profiles persist until you ask the operator to remove them. /paysupport for operator contact.",
     );
   });
   bot.command("terms", async (ctx) => {
@@ -168,8 +168,10 @@ export function createBot(env: Env): Bot {
     if (user?.is_banned)
       throw new UserError("Your account is suspended. Contact the operator through /paysupport.");
     if (user)
-      await env.DB.prepare("UPDATE users SET last_active_at = ? WHERE telegram_id = ?")
-        .bind(Date.now(), user.telegram_id)
+      await env.DB.prepare(
+        "UPDATE users SET last_active_at = ? WHERE telegram_id = ? AND last_active_at < ?",
+      )
+        .bind(Date.now(), user.telegram_id, Date.now() - 60_000)
         .run();
     await next();
   });
@@ -271,7 +273,7 @@ export function createBot(env: Env): Bot {
         await tell(
           env,
           id,
-          `Write a short icebreaker for ${target.display_name} (1–200 characters, no contact details). Sending it costs 10 credits, free with VIP. /cancel to cancel.`,
+          `Write a short icebreaker for ${target.display_name} (1–200 characters, no contact details). They receive it with a notification. Costs 10 credits, free with VIP. /cancel to cancel.`,
         );
         return;
       }
