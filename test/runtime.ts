@@ -3,8 +3,8 @@ import {
   MatchmakerDO as Matcher,
   TelegramDO as Telegram,
 } from "../src/index";
-import { queueControl, sessionControl } from "./controls";
-import { createHarness } from "./harness";
+import { queueControl, sessionControl } from "./support/controls";
+import { createHarness } from "./support/harness";
 import { scenarios } from "./scenarios";
 import type { Env } from "../src/types";
 

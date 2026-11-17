@@ -1,4 +1,4 @@
-import type { Env } from "../src/types";
+import type { Env } from "../../src/types";
 import type { Failure, Sent } from "./upstream";
 
 export interface Harness {

@@ -1,8 +1,8 @@
 # Roulette Telegram bot
 
-Native Telegram anonymous roulette and nearby discovery, implemented from [MVP.md](MVP.md) on Cloudflare Workers, D1 and SQLite-backed Durable Objects. There is no web app, Mini App, object storage or media download path.
+Native Telegram anonymous roulette and nearby discovery, implemented from [the MVP specification](docs/SPEC.md) on Cloudflare Workers, D1 and SQLite-backed Durable Objects. There is no web app, Mini App, object storage or media download path.
 
-[Verification checklist and remaining production checks](docs/MVP-CHECKLIST.md).
+[Verification report and remaining production checks](docs/VERIFICATION.md).
 
 The bot supports adult onboarding and editable photo profiles; free random roulette and mutually filtered searches; credit escrow; anonymous text and photo relay with reply threading; protected View-Once photos; mutual username exchange; nearby profile browsing; asynchronous requests, Super Waves and reconnect invitations; blocks, photo quarantine, Stars packages and a 7-day VIP pass.
 

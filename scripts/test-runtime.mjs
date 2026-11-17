@@ -11,10 +11,13 @@ import { createRequire } from "node:module";
 
 const dir = await mkdtemp(join(tmpdir(), "roulette-tests-"));
 try {
-  for (const entry of ["runtime", "upstream"])
+  for (const [entry, name] of [
+    ["test/runtime.ts", "runtime"],
+    ["test/support/upstream.ts", "upstream"],
+  ])
     await build({
-      entryPoints: [`test/${entry}.ts`],
-      outfile: join(dir, `${entry}.mjs`),
+      entryPoints: [entry],
+      outfile: join(dir, `${name}.mjs`),
       bundle: true,
       format: "esm",
       platform: "neutral",

@@ -1,10 +1,10 @@
 import { env as bindings } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { afterAll, beforeAll, test, vi } from "vitest";
-import { queueControl, sessionControl } from "./controls";
-import { createHarness } from "./harness";
+import { queueControl, sessionControl } from "./support/controls";
+import { createHarness } from "./support/harness";
 import { scenarios } from "./scenarios";
-import { fakeUpstream } from "./upstream";
+import { fakeUpstream } from "./support/upstream";
 import type { Env } from "../src/types";
 
 const env = bindings as unknown as Env;

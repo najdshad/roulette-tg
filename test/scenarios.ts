@@ -17,8 +17,8 @@ import {
   validName,
 } from "../src/privacy";
 import { DAY, FREE_FILTERS, type Filters, type User } from "../src/types";
-import type { Harness } from "./harness";
-import type { Sent } from "./upstream";
+import type { Harness } from "./support/harness";
+import type { Sent } from "./support/upstream";
 let uid = 1000,
   updateId = 1,
   msgId = 100000;

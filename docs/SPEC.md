@@ -1,4 +1,6 @@
-The **Telegram Anonymous Roulette Chat Bot - MVP Specification & Architecture Document** in your Google Docs has been updated with the finalized product requirements and technical specification incorporating all seven approved architectural decisions.
+# Telegram Anonymous Roulette Chat Bot — MVP Specification & Architecture
+
+Finalized product requirements and technical specification, incorporating all seven approved architectural decisions.
 
 ## 1. Executive Summary & Product Scope
 
