@@ -204,7 +204,7 @@ export function createBot(env: Env): Bot {
     if (action === "edit") {
       if (user.state === "QUEUED" || user.active_session_id)
         throw new UserError("Use /stop before editing your profile.");
-      await beginProfile(env, id, true);
+      await beginProfile(env, id);
       return;
     }
     if (action === "buy") {

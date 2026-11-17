@@ -6,7 +6,7 @@ Native Telegram anonymous roulette and nearby discovery, implemented from [MVP.m
 
 The bot supports adult onboarding and editable photo profiles; free random roulette and mutually filtered searches; credit escrow; anonymous text and photo relay with reply threading; protected View-Once photos; mutual username exchange; nearby profile browsing; asynchronous requests, Super Waves and reconnect invitations; blocks, photo quarantine, Stars packages and a 7-day VIP pass.
 
-Local implementation and tests are complete. Production deployment, real payment checks and live Telegram delivery checks are still required; see the checklist.
+Implementation, tests and deployment are complete. Live Telegram delivery, deletion-alarm and Stars payment checks still need real accounts; see the checklist.
 
 ## Run locally
 
@@ -54,7 +54,7 @@ GitHub Actions runs `npm run check`, `npm run test:runtime` and `npm run build` 
    npx wrangler d1 create roulette-tg
    ```
 
-   Copy the returned database ID into `wrangler.jsonc` in place of the placeholder.
+   Copy the returned database ID into `wrangler.jsonc` if you create a new database; this checkout already points at the project database.
 
 4. Configure secrets and apply migrations:
 

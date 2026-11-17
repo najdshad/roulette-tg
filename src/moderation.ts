@@ -33,12 +33,16 @@ export async function blockUser(
     await sessionAction(env, user.active_session_id, "close", { userId: user.telegram_id });
   if (user.state === "QUEUED") await matchAction(env, "leave", { userId: user.telegram_id });
   if (reason && (await suspendIfReported(env, target.telegram_id))) {
-    if (env.ADMIN_CHAT_ID)
-      await tell(
-        env,
-        Number(env.ADMIN_CHAT_ID),
-        `Photo privileges suspended for 24 hours.\nUser: ${target.telegram_id}\nProfile reference: ${target.public_id}\nAt least 3 unique reports in the last 24 hours. Review with the documented D1 queries.`,
-      );
+    try {
+      if (env.ADMIN_CHAT_ID)
+        await tell(
+          env,
+          Number(env.ADMIN_CHAT_ID),
+          `Photo privileges suspended for 24 hours.\nUser: ${target.telegram_id}\nProfile reference: ${target.public_id}\nAt least 3 unique reports in the last 24 hours. Review with the documented D1 queries.`,
+        );
+    } catch {
+      // The suspension is already recorded; a bad admin channel must not fail the report.
+    }
   }
   await tell(
     env,

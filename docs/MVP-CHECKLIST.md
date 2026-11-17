@@ -5,9 +5,17 @@ Local verification on November 17, 2026:
 - `npm run typecheck` passed, including application code, integration tests and test configuration.
 - `npm run format:check` passed.
 - `npm run build` passed: Wrangler produced the Worker bundle and resolved all D1 and Durable Object bindings.
-- `npm run test:runtime` passed all 25 scenarios in `test/scenarios.ts`, using workerd, SQLite Durable Objects and Cloudflare's D1 implementation. The View-Once scenario waited for the actual ten-second alarm to delete the photo.
+- `npm test` passed all 27 tests: the 25 scenarios in `test/scenarios.ts` plus the privacy tests, against Cloudflare's D1 and SQLite Durable Objects.
+- `npm run test:runtime` passed the same 25 scenarios using workerd and temporary storage. The View-Once scenario waited for the actual ten-second alarm to delete the photo.
 - Manifest/lockfile consistency, script syntax, and Git whitespace checks passed.
-- The standard `npm test` entrypoint could not start in this sandbox because localhost listeners are denied (`listen EPERM`). Its integration scenarios are shared with the passing socket-free runner. CI now runs both `npm test` and `npm run test:runtime`; that CI run has not been observed.
+
+Production status on November 17, 2026:
+
+- The `roulette-tg` Worker is deployed at `https://roulette-tg.alirezanajdshad28.workers.dev`; `GET /health` returns `ok`.
+- The D1 migration is applied remotely, and the `BOT_TOKEN`, `WEBHOOK_SECRET` and `ADMIN_CHAT_ID` Worker secrets are set.
+- The webhook is registered with its secret token, ten connections and the message, callback and checkout update types.
+- The GitHub Actions `check` and `deploy` jobs passed on `main`.
+- One live account has completed onboarding. No live match, chat request, report or Stars payment has been made yet.
 
 | MVP requirement                                                               | Implementation and local evidence                                                                                                                |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -33,12 +41,13 @@ Telegram does not expose incoming typing or spoiler-open events to bots, and pro
 
 ## Unverified production work
 
-The full objective remains open until deployment and live validation are possible:
+The implementation is deployed, but these live checks remain:
 
-- Configure the actual bot token, webhook secret, bot username, Cloudflare account and D1 database ID, support contact, geocoder identity, and private review channel.
-- Apply the D1 migration remotely and deploy the Worker and SQLite Durable Object migrations.
-- Register the real HTTPS webhook and native command menu.
-- Verify onboarding, matching, relay, requests, moderation delivery and Stars payments with real test accounts.
-- Observe the deployed ten-second and 24-hour deletion alarms in Telegram.
+- Confirm `SUPPORT_CONTACT` (@nnajduu) and the contact-bearing `GEOCODER_USER_AGENT` in `wrangler.jsonc` are live after the next deploy.
+- With two adult test accounts, complete onboarding, match, exchange text and photos, reply, use `/reveal`, `/next` and `/stop`, and accept a nearby request and a Super Wave.
+- Make a Stars purchase in Telegram's test environment, then confirm credits, the VIP expiry and `/paysupport`.
+- Observe a delivered View-Once photo deleted after 10 seconds and an ordinary message after 24 hours.
+- Confirm the bot can post to the private `ADMIN_CHAT_ID`, including the three-report alert and the payment-mismatch alert.
+- Confirm the hourly cron runs.
 
-No project bot secrets or local `.dev.vars` are configured in this checkout, and the D1 database ID is still a placeholder. A cached Wrangler OAuth login exists outside the repository; its access token expired on November 3, 2026, and refreshing it requires network access. Outbound connections, including the supplied proxy at `172.25.144.1:10808`, are denied by the current sandbox. No production deployment, webhook mutation, real notification, or live payment was performed. Follow the README deployment instructions once account access and networking are available.
+Local mocks cannot prove real Telegram delivery or Cloudflare's deployed alarms. Follow the README deployment instructions when these checks are possible.

@@ -28,7 +28,7 @@
   "vars": {
     "BOT_USERNAME": "chatourlettebot",
     "GEOCODER_URL": "https://nominatim.openstreetmap.org",
-    "GEOCODER_USER_AGENT": "roulette-tg/0.1 (configure operator contact before launch)",
-    "SUPPORT_CONTACT": "Contact the bot operator with your Telegram payment receipt.",
+    "GEOCODER_USER_AGENT": "roulette-tg/0.1 (https://t.me/nnajduu)",
+    "SUPPORT_CONTACT": "Support: @nnajduu",
   },
 }

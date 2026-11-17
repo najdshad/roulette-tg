@@ -66,9 +66,7 @@ export interface Draft {
     | "city-confirm"
     | "photos"
     | "filters-age"
-    | "wave"
-    | "report";
-  editing?: boolean;
+    | "wave";
   age?: number;
   name?: string;
   gender?: Gender;

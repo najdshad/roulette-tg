@@ -13,8 +13,8 @@ const locationKeyboard = {
   resize_keyboard: true,
   one_time_keyboard: true,
 };
-export async function beginProfile(env: Env, id: number, editing = false): Promise<void> {
-  await putDraft(env, id, { step: "adult", editing });
+export async function beginProfile(env: Env, id: number): Promise<void> {
+  await putDraft(env, id, { step: "adult" });
   await tell(
     env,
     id,
