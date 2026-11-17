@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "roulette-tg",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "3796777a-5435-4020-90a6-fdfae9035ee4",
       "migrations_dir": "migrations",
     },
   ],
@@ -26,7 +26,7 @@
   ],
   "triggers": { "crons": ["17 * * * *"] },
   "vars": {
-    "BOT_USERNAME": "roulette_example_bot",
+    "BOT_USERNAME": "chatourlettebot",
     "GEOCODER_URL": "https://nominatim.openstreetmap.org",
     "GEOCODER_USER_AGENT": "roulette-tg/0.1 (configure operator contact before launch)",
     "SUPPORT_CONTACT": "Contact the bot operator with your Telegram payment receipt.",
