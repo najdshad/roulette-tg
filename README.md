@@ -41,7 +41,7 @@ Vitest runs inside Cloudflare's Workers runtime with D1 and SQLite-backed Durabl
 
 If a restricted environment cannot bind localhost ports, the socket-free runner uses `workerd test` with the application's actual Durable Objects, SQLite storage, and Cloudflare's D1 implementation. Its inspection routes exist only in the test bundle, and it uses temporary storage that is removed afterward.
 
-GitHub Actions runs `npm run check`, `npm run test:runtime` and `npm run build`.
+GitHub Actions runs `npm run check`, `npm run test:runtime` and `npm run build` on every push and pull request. Pushes to `main` that pass the checks are then deployed: pending D1 migrations are applied, followed by `npm run deploy`. Add `CLOUDFLARE_API_TOKEN` (Workers Scripts edit + D1 edit) and `CLOUDFLARE_ACCOUNT_ID` as repository secrets for the deploy job; `BOT_TOKEN`, `WEBHOOK_SECRET` and `ADMIN_CHAT_ID` stay as Worker secrets set with Wrangler.
 
 ## Deploy
 
